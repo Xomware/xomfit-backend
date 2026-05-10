@@ -19,6 +19,7 @@ WORKOUTS_TABLE = os.environ.get("WORKOUTS_TABLE", "xomfit-workouts")
 EXERCISES_TABLE = os.environ.get("EXERCISES_TABLE", "xomfit-exercises")
 SOCIAL_TABLE = os.environ.get("SOCIAL_TABLE", "xomfit-social")
 FEED_TABLE = os.environ.get("FEED_TABLE", "xomfit-feed")
+REPORTS_TABLE = os.environ.get("REPORTS_TABLE", "xomfit-reports")
 
 
 # ============================================
@@ -98,6 +99,52 @@ def get_user_workouts(user_id: str, limit: int = 20) -> list:
         Limit=limit
     )
     return resp.get("Items", [])
+
+
+def get_user_workouts_in_range(user_id: str, start_iso: str, end_iso: str) -> list:
+    """Get all workouts for a user with started_at in [start_iso, end_iso)."""
+    table = dynamodb.Table(WORKOUTS_TABLE)
+    items: list = []
+    last_key: Optional[dict] = None
+    while True:
+        kwargs = {
+            "IndexName": "user_id-started_at-index",
+            "KeyConditionExpression": (
+                Key("user_id").eq(user_id) & Key("started_at").between(start_iso, end_iso)
+            ),
+            "ScanIndexForward": True,
+        }
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        resp = table.query(**kwargs)
+        items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+    return items
+
+
+def get_user_workouts_before(user_id: str, end_iso: str) -> list:
+    """Get all workouts for a user with started_at < end_iso (used for PR baseline)."""
+    table = dynamodb.Table(WORKOUTS_TABLE)
+    items: list = []
+    last_key: Optional[dict] = None
+    while True:
+        kwargs = {
+            "IndexName": "user_id-started_at-index",
+            "KeyConditionExpression": (
+                Key("user_id").eq(user_id) & Key("started_at").lt(end_iso)
+            ),
+            "ScanIndexForward": True,
+        }
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        resp = table.query(**kwargs)
+        items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+    return items
 
 
 def get_user_prs(user_id: str) -> list:
@@ -204,3 +251,79 @@ def get_feed(user_id: str, limit: int = 20) -> list:
     # Sort by created_at descending
     all_posts.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return all_posts[:limit]
+
+
+# ============================================
+# Reports
+# ============================================
+
+def put_report(report: dict) -> dict:
+    table = dynamodb.Table(REPORTS_TABLE)
+    table.put_item(Item=report)
+    return report
+
+
+def get_report(user_id: str, report_id: str) -> dict:
+    """Fetch a report; raises NotFoundError if missing or not owned by user."""
+    table = dynamodb.Table(REPORTS_TABLE)
+    resp = table.get_item(Key={"report_id": report_id})
+    item = resp.get("Item")
+    if not item or item.get("user_id") != user_id:
+        raise NotFoundError(f"Report {report_id} not found")
+    return item
+
+
+def list_user_reports(user_id: str, kind: Optional[str] = None, limit: int = 50) -> list:
+    """List a user's reports newest first. Optionally filter by kind."""
+    table = dynamodb.Table(REPORTS_TABLE)
+    kwargs: dict = {
+        "IndexName": "user_id-period_start-index",
+        "KeyConditionExpression": Key("user_id").eq(user_id),
+        "ScanIndexForward": False,
+        "Limit": limit,
+    }
+    if kind:
+        kwargs["FilterExpression"] = Attr("kind").eq(kind)
+    resp = table.query(**kwargs)
+    return resp.get("Items", [])
+
+
+def update_report(user_id: str, report_id: str, updates: dict) -> dict:
+    """Update fields on a report owned by user_id."""
+    # Verify ownership first.
+    get_report(user_id, report_id)
+    table = dynamodb.Table(REPORTS_TABLE)
+    expr_parts = []
+    expr_values = {}
+    expr_names = {}
+    for key, val in updates.items():
+        safe_key = f"#{key}"
+        expr_parts.append(f"{safe_key} = :{key}")
+        expr_values[f":{key}"] = val
+        expr_names[safe_key] = key
+
+    resp = table.update_item(
+        Key={"report_id": report_id},
+        UpdateExpression="SET " + ", ".join(expr_parts),
+        ExpressionAttributeValues=expr_values,
+        ExpressionAttributeNames=expr_names,
+        ReturnValues="ALL_NEW",
+    )
+    return resp.get("Attributes", {})
+
+
+def scan_all_users() -> list:
+    """Scan the users table — used by the reports cron. Returns minimal fields."""
+    table = dynamodb.Table(USERS_TABLE)
+    items: list = []
+    last_key: Optional[dict] = None
+    while True:
+        kwargs: dict = {}
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+    return items
