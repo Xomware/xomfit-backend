@@ -54,6 +54,19 @@ Python Lambda backend for XomFit — social fitness & lifting tracker.
 |--------|------|---------|-------------|
 | GET | /exercises/list | exercises_list | Browse exercise library |
 
+### Reports Service (`/reports`)
+| Method | Path | Handler | Description |
+|--------|------|---------|-------------|
+| GET | /reports | reports_list | List current user's reports (newest first) |
+| POST | /reports/{id}/read | reports_read | Mark a report as read |
+| POST | /reports/{id}/feedback | reports_feedback | Store rating + optional text on a report |
+
+The cron handler `reports_cron` is invoked by EventBridge on an hourly
+schedule. It iterates users, computes weekly (Mon..Sun) and monthly
+(calendar month) windows in each user's local timezone, generates stats +
+a Claude recommendation, persists a `user_report` row, and fires an APNs
+push when an `apns_device_token` is present on the user.
+
 ## DynamoDB Tables
 
 | Table | Partition Key | Sort Key | GSIs |
@@ -62,6 +75,7 @@ Python Lambda backend for XomFit — social fitness & lifting tracker.
 | xomfit-workouts | workout_id | — | user_id-started_at-index |
 | xomfit-social | user_id | sk | — |
 | xomfit-feed | user_id | sk | — |
+| xomfit-reports | report_id | — | user_id-period_start-index |
 
 ## Project Structure
 ```
