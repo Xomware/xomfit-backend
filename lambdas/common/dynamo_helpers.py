@@ -24,10 +24,8 @@ AI_COACH_USAGE_TABLE = os.environ.get("AI_COACH_USAGE_TABLE", "xomfit-ai-coach-u
 AI_COACH_COST_TABLE = os.environ.get("AI_COACH_COST_TABLE", "xomfit-ai-coach-cost")
 
 
-# ============================================
-# Users
-# ============================================
-
+# =====================================# Users
+# =====================================
 def get_user(user_id: str) -> dict:
     table = dynamodb.Table(USERS_TABLE)
     resp = table.get_item(Key={"user_id": user_id})
@@ -73,10 +71,8 @@ def search_users(query: str, limit: int = 20) -> list:
     return resp.get("Items", [])
 
 
-# ============================================
-# Workouts
-# ============================================
-
+# =====================================# Workouts
+# =====================================
 def save_workout(workout: dict) -> dict:
     table = dynamodb.Table(WORKOUTS_TABLE)
     table.put_item(Item=workout)
@@ -172,10 +168,8 @@ def get_user_prs(user_id: str) -> list:
     return list(prs.values())
 
 
-# ============================================
-# Social / Friends
-# ============================================
-
+# =====================================# Social / Friends
+# =====================================
 def get_friends(user_id: str) -> list:
     table = dynamodb.Table(SOCIAL_TABLE)
     resp = table.query(
@@ -215,10 +209,8 @@ def get_pending_requests(user_id: str) -> list:
     return resp.get("Items", [])
 
 
-# ============================================
-# Feed
-# ============================================
-
+# =====================================# Feed
+# =====================================
 def post_to_feed(user_id: str, workout_id: str, workout_summary: dict) -> dict:
     table = dynamodb.Table(FEED_TABLE)
     now = __import__("lambdas.common.utility_helpers", fromlist=["now_iso"]).now_iso()
@@ -255,10 +247,8 @@ def get_feed(user_id: str, limit: int = 20) -> list:
     return all_posts[:limit]
 
 
-# ============================================
-# Reports
-# ============================================
-
+# =====================================# Reports
+# =====================================
 def put_report(report: dict) -> dict:
     table = dynamodb.Table(REPORTS_TABLE)
     table.put_item(Item=report)
@@ -331,10 +321,8 @@ def scan_all_users() -> list:
     return items
 
 
-# ============================================
-# AI Coach usage + cost (#391)
-# ============================================
-
+# =====================================# AI Coach usage + cost (#391)
+# =====================================
 def get_ai_coach_daily_count(user_id: str, date_yyyymmdd: str) -> int:
     """Return the current daily message count for a user. 0 if no row yet."""
     table = dynamodb.Table(AI_COACH_USAGE_TABLE)
