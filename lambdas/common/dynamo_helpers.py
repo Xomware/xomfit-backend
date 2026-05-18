@@ -20,6 +20,8 @@ EXERCISES_TABLE = os.environ.get("EXERCISES_TABLE", "xomfit-exercises")
 SOCIAL_TABLE = os.environ.get("SOCIAL_TABLE", "xomfit-social")
 FEED_TABLE = os.environ.get("FEED_TABLE", "xomfit-feed")
 REPORTS_TABLE = os.environ.get("REPORTS_TABLE", "xomfit-reports")
+AI_COACH_USAGE_TABLE = os.environ.get("AI_COACH_USAGE_TABLE", "xomfit-ai-coach-usage")
+AI_COACH_COST_TABLE = os.environ.get("AI_COACH_COST_TABLE", "xomfit-ai-coach-cost")
 
 
 # ============================================
@@ -327,3 +329,67 @@ def scan_all_users() -> list:
         if not last_key:
             break
     return items
+
+
+# ============================================
+# AI Coach usage + cost (#391)
+# ============================================
+
+def get_ai_coach_daily_count(user_id: str, date_yyyymmdd: str) -> int:
+    """Return the current daily message count for a user. 0 if no row yet."""
+    table = dynamodb.Table(AI_COACH_USAGE_TABLE)
+    resp = table.get_item(Key={"user_id": user_id, "date": date_yyyymmdd})
+    item = resp.get("Item")
+    if not item:
+        return 0
+    try:
+        return int(item.get("count", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def increment_ai_coach_daily_count(user_id: str, date_yyyymmdd: str) -> int:
+    """Atomically increment the daily counter and return the new value."""
+    table = dynamodb.Table(AI_COACH_USAGE_TABLE)
+    resp = table.update_item(
+        Key={"user_id": user_id, "date": date_yyyymmdd},
+        UpdateExpression="ADD #c :one SET updated_at = :now",
+        ExpressionAttributeNames={"#c": "count"},
+        ExpressionAttributeValues={":one": 1, ":now": __import__(
+            "lambdas.common.utility_helpers", fromlist=["now_iso"]
+        ).now_iso()},
+        ReturnValues="UPDATED_NEW",
+    )
+    new_count = resp.get("Attributes", {}).get("count", 0)
+    try:
+        return int(new_count)
+    except (TypeError, ValueError):
+        return 0
+
+
+def put_ai_coach_cost(
+    user_id: str,
+    date_yyyymmdd: str,
+    request_id: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> dict:
+    """Log per-request token usage for weekly aggregation (feeds #260)."""
+    table = dynamodb.Table(AI_COACH_COST_TABLE)
+    item = {
+        "user_id": user_id,
+        # Composite sort key keeps the per-day stream queryable while still
+        # unique per request.
+        "sk": f"{date_yyyymmdd}#{request_id}",
+        "date": date_yyyymmdd,
+        "request_id": request_id,
+        "model": model,
+        "input_tokens": int(input_tokens or 0),
+        "output_tokens": int(output_tokens or 0),
+        "created_at": __import__(
+            "lambdas.common.utility_helpers", fromlist=["now_iso"]
+        ).now_iso(),
+    }
+    table.put_item(Item=item)
+    return item
